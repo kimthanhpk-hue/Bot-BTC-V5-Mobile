@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC V5 Mobile</title>
+<style>
+body{font-family:Arial,sans-serif;background:#111827;color:#f9fafb;margin:0;padding:14px}
+.wrap{max-width:760px;margin:auto}
+.card{background:#1f2937;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 4px 20px rgba(0,0,0,.25)}
+h1{font-size:24px;margin:0 0 12px}
+.big{font-size:28px;font-weight:700}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.item{background:#111827;border-radius:12px;padding:12px}
+.label{font-size:12px;color:#9ca3af;margin-bottom:4px}
+.value{font-size:18px;font-weight:700}
+.bar{height:16px;background:#374151;border-radius:9px;overflow:hidden}
+.fill{height:100%;background:#22c55e}
+.fill.short{background:#ef4444}
+.warn{background:#7c2d12;padding:10px;border-radius:10px;margin-top:8px}
+.small{font-size:12px;color:#9ca3af}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:8px;border-bottom:1px solid #374151;text-align:left}
+@media(max-width:520px){.grid{grid-template-columns:1fr}.big{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h1>BOT BTC V5 MOBILE</h1>
+<div class="small">Cập nhật: <span id="updated">-</span></div>
+<div class="big" id="price">-</div>
+<div class="value" id="conclusion">CHỜ</div>
+<div class="small" id="strength">-</div>
+</div>
+
+<div class="card">
+<div class="grid">
+<div class="item"><div class="label">LONG</div><div class="value" id="longscore">0/100</div><div class="bar"><div class="fill" id="longbar" style="width:0%"></div></div></div>
+<div class="item"><div class="label">SHORT</div><div class="value" id="shortscore">0/100</div><div class="bar"><div class="fill short" id="shortbar" style="width:0%"></div></div></div>
+<div class="item"><div class="label">Độ tin cậy</div><div class="value" id="confidence">-</div></div>
+<div class="item"><div class="label">Breakout / Retest</div><div class="value" id="retest">-</div></div>
+</div>
+</div>
+
+<div class="card">
+<div class="grid">
+<div class="item"><div class="label">Xu hướng 15m</div><div class="value" id="trend15">-</div></div>
+<div class="item"><div class="label">Xu hướng 1h</div><div class="value" id="trend1h">-</div></div>
+<div class="item"><div class="label">EMA34</div><div class="value" id="ema34">-</div></div>
+<div class="item"><div class="label">EMA89</div><div class="value" id="ema89">-</div></div>
+<div class="item"><div class="label">EMA200</div><div class="value" id="ema200">-</div></div>
+<div class="item"><div class="label">EMA500</div><div class="value" id="ema500">-</div></div>
+<div class="item"><div class="label">MACD 15m</div><div class="value" id="macd15">-</div></div>
+<div class="item"><div class="label">RSI 15m</div><div class="value" id="rsi15">-</div></div>
+<div class="item"><div class="label">Volume</div><div class="value" id="volume">-</div></div>
+<div class="item"><div class="label">Xếp EMA</div><div class="value" id="align">-</div></div>
+</div>
+<div id="warnings"></div>
+</div>
+
+<div class="card">
+<div class="label">Lịch sử gần đây</div>
+<table>
+<thead><tr><th>Thời gian</th><th>Kết luận</th><th>Giá</th><th>Tin cậy</th></tr></thead>
+<tbody id="history"></tbody>
+</table>
+</div>
+
+<div class="small">Chỉ dùng để phân tích/paper trading. Không đặt lệnh thật.</div>
+</div>
+
+<script>
+const fmt=x=>x==null?"-":Number(x).toLocaleString("en-US",{maximumFractionDigits:2});
+async function refresh(){
+  const r=await fetch("/api/state");
+  const d=await r.json();
+  document.getElementById("updated").textContent=d.updated;
+  document.getElementById("price").textContent=d.price==null?"-":fmt(d.price)+" USDT";
+  document.getElementById("conclusion").textContent=d.conclusion;
+  document.getElementById("strength").textContent=d.strength;
+  document.getElementById("longscore").textContent=d.long_score+"/100";
+  document.getElementById("shortscore").textContent=d.short_score+"/100";
+  document.getElementById("longbar").style.width=d.long_score+"%";
+  document.getElementById("shortbar").style.width=d.short_score+"%";
+  document.getElementById("confidence").textContent=d.confidence_text+" ("+d.confidence+"/100)";
+  document.getElementById("retest").textContent=d.retest;
+  document.getElementById("trend15").textContent=d.trend15;
+  document.getElementById("trend1h").textContent=d.trend1h;
+  document.getElementById("ema34").textContent=fmt(d.ema34);
+  document.getElementById("ema89").textContent=fmt(d.ema89);
+  document.getElementById("ema200").textContent=fmt(d.ema200);
+  document.getElementById("ema500").textContent=fmt(d.ema500);
+  document.getElementById("macd15").textContent=d.macd15;
+  document.getElementById("rsi15").textContent=d.rsi15==null?"-":Number(d.rsi15).toFixed(1);
+  document.getElementById("volume").textContent=d.volume_ratio==null?"-":Number(d.volume_ratio).toFixed(2)+"x";
+  document.getElementById("align").textContent=d.ema_alignment;
+  document.getElementById("warnings").innerHTML=(d.warnings||[]).map(x=>'<div class="warn">'+x+'</div>').join("");
+  document.getElementById("history").innerHTML=(d.history||[]).map(x=>`<tr><td>${x.time}</td><td>${x.conclusion}</td><td>${fmt(x.price)}</td><td>${x.confidence}</td></tr>`).join("");
+}
+refresh(); setInterval(refresh,10000);
+</script>
+</body></html>
