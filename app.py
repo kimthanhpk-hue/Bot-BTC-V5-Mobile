@@ -1,12 +1,12 @@
 
 from flask import Flask, jsonify, render_template
-import requests, threading, time
+import requests, threading, time, os
 from datetime import datetime
 from collections import deque
 
 app = Flask(__name__)
 
-API = "https://data-api.binance.vision/api/v3/klines"
+API = "https://api.binance.com/api/v3/klines"
 SYMBOL = "BTCUSDT"
 
 state = {
@@ -34,11 +34,16 @@ state = {
     "support": None,
     "resistance": None,
     "warnings": [],
+    "alert_id": 0,
+    "last_alert": None,
 }
 history = deque(maxlen=100)
 active_breakout = None
 lock = threading.Lock()
 last_refresh_ts = 0.0
+last_confirmed_signal = None
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 def ema(values, period):
     if len(values) < period:
@@ -298,6 +303,65 @@ def score(a15, a1h, retest_state, retest_side):
     conf_text = "CAO" if confidence >= 75 else "TRUNG BÌNH" if confidence >= 55 else "THẤP"
     return long_score, short_score, confidence, conf_text, conclusion, strength, warnings
 
+
+def send_telegram_alert(message):
+    """Gửi cảnh báo Telegram nếu người dùng đã cấu hình biến môi trường."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        r = requests.post(
+            url,
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": message},
+            timeout=10
+        )
+        r.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+def register_signal_alert(conclusion, price, confidence, long_score, short_score):
+    """Chỉ tạo cảnh báo khi có tín hiệu xác nhận MỚI, không cảnh báo lặp lại."""
+    global last_confirmed_signal
+
+    confirmed = conclusion in (
+        "TÍN HIỆU LONG ĐÃ XÁC NHẬN",
+        "TÍN HIỆU SHORT ĐÃ XÁC NHẬN"
+    )
+
+    if not confirmed:
+        last_confirmed_signal = None
+        return
+
+    side = "LONG" if "LONG" in conclusion else "SHORT"
+    signal_key = side
+
+    if last_confirmed_signal == signal_key:
+        return
+
+    last_confirmed_signal = signal_key
+    now_text = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    message = (
+        f"BTC/USDT: TÍN HIỆU KỸ THUẬT {side} ĐÃ XÁC NHẬN\n"
+        f"Giá: {price:,.2f} USDT\n"
+        f"Độ tin cậy: {confidence}/100\n"
+        f"LONG: {long_score}/100 | SHORT: {short_score}/100\n"
+        f"Thời gian: {now_text}\n"
+        f"Chỉ dùng để phân tích/paper trading. Hãy kiểm tra thủ công trước mọi quyết định."
+    )
+
+    with lock:
+        state["alert_id"] = int(state.get("alert_id", 0)) + 1
+        state["last_alert"] = {
+            "time": now_text,
+            "side": side,
+            "price": price,
+            "confidence": confidence,
+            "message": message
+        }
+
+    send_telegram_alert(message)
+
 def refresh_once():
     global last_refresh_ts
     try:
@@ -306,6 +370,14 @@ def refresh_once():
         retest_state, retest_side = update_retest(a15)
         ls, ss, conf, conf_text, conclusion, strength, warnings = score(
             a15, a1h, retest_state, retest_side
+        )
+
+        register_signal_alert(
+            conclusion,
+            a15["price"],
+            conf,
+            ls,
+            ss
         )
 
         now_text = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
