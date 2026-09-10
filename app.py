@@ -38,6 +38,7 @@ state = {
 history = deque(maxlen=100)
 active_breakout = None
 lock = threading.Lock()
+last_refresh_ts = 0.0
 
 def ema(values, period):
     if len(values) < period:
@@ -297,54 +298,63 @@ def score(a15, a1h, retest_state, retest_side):
     conf_text = "CAO" if confidence >= 75 else "TRUNG BÌNH" if confidence >= 55 else "THẤP"
     return long_score, short_score, confidence, conf_text, conclusion, strength, warnings
 
+def refresh_once():
+    global last_refresh_ts
+    try:
+        a15 = analyze_tf(fetch("15m"))
+        a1h = analyze_tf(fetch("1h"))
+        retest_state, retest_side = update_retest(a15)
+        ls, ss, conf, conf_text, conclusion, strength, warnings = score(
+            a15, a1h, retest_state, retest_side
+        )
+
+        now_text = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        with lock:
+            state.update({
+                "updated": now_text,
+                "price": a15["price"],
+                "conclusion": conclusion,
+                "strength": strength,
+                "confidence": conf,
+                "confidence_text": conf_text,
+                "long_score": ls,
+                "short_score": ss,
+                "trend15": a15["trend"],
+                "trend1h": a1h["trend"],
+                "ema34": a15["ema34"],
+                "ema89": a15["ema89"],
+                "ema200": a15["ema200"],
+                "ema500": a15["ema500"],
+                "ema_alignment": a15["alignment"],
+                "macd15": a15["macd"],
+                "rsi15": a15["rsi"],
+                "volume_ratio": a15["volume_ratio"],
+                "breakout": a15["breakout"],
+                "breakout_level": a15["breakout_level"],
+                "retest": retest_state,
+                "support": a15["support"],
+                "resistance": a15["resistance"],
+                "warnings": warnings,
+            })
+            history.appendleft({
+                "time": now_text,
+                "conclusion": conclusion,
+                "price": a15["price"],
+                "long": ls,
+                "short": ss,
+                "confidence": conf
+            })
+            last_refresh_ts = time.time()
+        return True
+    except Exception as e:
+        with lock:
+            state["updated"] = f"Lỗi: {type(e).__name__}: {e}"
+            last_refresh_ts = time.time()
+        return False
+
 def worker():
     while True:
-        try:
-            a15 = analyze_tf(fetch("15m"))
-            a1h = analyze_tf(fetch("1h"))
-            retest_state, retest_side = update_retest(a15)
-            ls, ss, conf, conf_text, conclusion, strength, warnings = score(
-                a15, a1h, retest_state, retest_side
-            )
-
-            with lock:
-                state.update({
-                    "updated": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                    "price": a15["price"],
-                    "conclusion": conclusion,
-                    "strength": strength,
-                    "confidence": conf,
-                    "confidence_text": conf_text,
-                    "long_score": ls,
-                    "short_score": ss,
-                    "trend15": a15["trend"],
-                    "trend1h": a1h["trend"],
-                    "ema34": a15["ema34"],
-                    "ema89": a15["ema89"],
-                    "ema200": a15["ema200"],
-                    "ema500": a15["ema500"],
-                    "ema_alignment": a15["alignment"],
-                    "macd15": a15["macd"],
-                    "rsi15": a15["rsi"],
-                    "volume_ratio": a15["volume_ratio"],
-                    "breakout": a15["breakout"],
-                    "breakout_level": a15["breakout_level"],
-                    "retest": retest_state,
-                    "support": a15["support"],
-                    "resistance": a15["resistance"],
-                    "warnings": warnings,
-                })
-                history.appendleft({
-                    "time": state["updated"],
-                    "conclusion": conclusion,
-                    "price": a15["price"],
-                    "long": ls,
-                    "short": ss,
-                    "confidence": conf
-                })
-        except Exception as e:
-            with lock:
-                state["updated"] = f"Lỗi: {e}"
+        refresh_once()
         time.sleep(30)
 
 @app.route("/")
@@ -353,6 +363,12 @@ def home():
 
 @app.route("/api/state")
 def api_state():
+    global last_refresh_ts
+    # Trên Render/Gunicorn, không phụ thuộc hoàn toàn vào thread nền.
+    # Nếu chưa có dữ liệu hoặc dữ liệu cũ hơn 30 giây, làm mới ngay khi có request.
+    if last_refresh_ts == 0 or (time.time() - last_refresh_ts) >= 30:
+        refresh_once()
+
     with lock:
         d = dict(state)
         d["history"] = list(history)[:20]
