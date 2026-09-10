@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BTC V5 Mobile</title>
+<title>BTC V5.1 Mobile</title>
 <style>
 body{font-family:Arial,sans-serif;background:#111827;color:#f9fafb;margin:0;padding:14px}
 .wrap{max-width:760px;margin:auto}
@@ -19,6 +19,8 @@ h1{font-size:24px;margin:0 0 12px}
 .fill.short{background:#ef4444}
 .warn{background:#7c2d12;padding:10px;border-radius:10px;margin-top:8px}
 .small{font-size:12px;color:#9ca3af}
+.notify-btn{margin:10px 0 4px;padding:10px 14px;border:0;border-radius:10px;font-weight:700;cursor:pointer}
+.alert-card{border:1px solid #f59e0b}
 table{width:100%;border-collapse:collapse;font-size:13px}
 td,th{padding:8px;border-bottom:1px solid #374151;text-align:left}
 @media(max-width:520px){.grid{grid-template-columns:1fr}.big{font-size:24px}}
@@ -26,12 +28,15 @@ td,th{padding:8px;border-bottom:1px solid #374151;text-align:left}
 </head>
 <body>
 <div class="wrap">
+
 <div class="card">
-<h1>BOT BTC V5 MOBILE</h1>
+<h1>BOT BTC V5.1 MOBILE</h1>
 <div class="small">Cập nhật: <span id="updated">-</span></div>
 <div class="big" id="price">-</div>
 <div class="value" id="conclusion">CHỜ</div>
 <div class="small" id="strength">-</div>
+<button id="btnNotify" class="notify-btn" onclick="enableNotifications()">BẬT THÔNG BÁO</button>
+<div class="small" id="notifyStatus">Thông báo trình duyệt đang tắt</div>
 </div>
 
 <div class="card">
@@ -59,6 +64,12 @@ td,th{padding:8px;border-bottom:1px solid #374151;text-align:left}
 <div id="warnings"></div>
 </div>
 
+<div class="card alert-card" id="alertCard" style="display:none">
+<div class="label">Cảnh báo tín hiệu mới</div>
+<div class="value" id="alertMessage">-</div>
+<div class="small">Tín hiệu kỹ thuật để kiểm tra thủ công, không phải lệnh giao dịch tự động.</div>
+</div>
+
 <div class="card">
 <div class="label">Lịch sử gần đây</div>
 <table>
@@ -72,6 +83,56 @@ td,th{padding:8px;border-bottom:1px solid #374151;text-align:left}
 
 <script>
 const fmt=x=>x==null?"-":Number(x).toLocaleString("en-US",{maximumFractionDigits:2});
+let lastAlertId = 0;
+let audioCtx = null;
+
+function beep(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value = 880;
+    gain.gain.value = 0.08;
+    osc.start();
+    setTimeout(()=>osc.stop(),350);
+  }catch(e){}
+}
+
+async function enableNotifications(){
+  if(!("Notification" in window)){
+    document.getElementById("notifyStatus").textContent="Trình duyệt này không hỗ trợ thông báo.";
+    return;
+  }
+  const p = await Notification.requestPermission();
+  document.getElementById("notifyStatus").textContent =
+    p==="granted" ? "Đã bật thông báo trình duyệt" : "Chưa được cấp quyền thông báo";
+  if(p==="granted") beep();
+}
+
+function handleAlert(d){
+  const id = Number(d.alert_id || 0);
+  if(!id || id === lastAlertId) return;
+  lastAlertId = id;
+
+  const a = d.last_alert;
+  if(!a) return;
+
+  const card = document.getElementById("alertCard");
+  const msg = document.getElementById("alertMessage");
+  card.style.display = "block";
+  msg.textContent = `${a.side} | ${fmt(a.price)} USDT | Tin cậy ${a.confidence}/100`;
+
+  beep();
+
+  if("Notification" in window && Notification.permission === "granted"){
+    new Notification("BTC V5.1 - Tín hiệu kỹ thuật đã xác nhận", {
+      body: `${a.side} | Giá ${fmt(a.price)} USDT | Tin cậy ${a.confidence}/100`
+    });
+  }
+}
+
 async function refresh(){
   const r=await fetch("/api/state");
   const d=await r.json();
@@ -97,7 +158,10 @@ async function refresh(){
   document.getElementById("align").textContent=d.ema_alignment;
   document.getElementById("warnings").innerHTML=(d.warnings||[]).map(x=>'<div class="warn">'+x+'</div>').join("");
   document.getElementById("history").innerHTML=(d.history||[]).map(x=>`<tr><td>${x.time}</td><td>${x.conclusion}</td><td>${fmt(x.price)}</td><td>${x.confidence}</td></tr>`).join("");
+  handleAlert(d);
 }
-refresh(); setInterval(refresh,10000);
+refresh();
+setInterval(refresh,10000);
 </script>
-</body></html>
+</body>
+</html>
