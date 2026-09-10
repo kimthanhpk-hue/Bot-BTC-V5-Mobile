@@ -6,7 +6,7 @@ from collections import deque
 
 app = Flask(__name__)
 
-API = "https://api.binance.com/api/v3/klines"
+API = "https://data-api.binance.vision/api/v3/klines"
 SYMBOL = "BTCUSDT"
 
 state = {
